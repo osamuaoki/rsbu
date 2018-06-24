@@ -1,0 +1,6 @@
+rsbu (0.1) unstable; urgency=low
+
+  * Initial release of rsbu to github
+    - Makefile supporting $(DESTDIR).
+
+ -- Osamu Aoki <osamu@debian.org>  Fri, 22 Jun 2018 16:45:58 +0000

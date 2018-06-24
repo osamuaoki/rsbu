@@ -1,0 +1,15 @@
+Source: rsbu
+Section: devel
+Priority: optional
+Maintainer: Osamu Aoki <osamu@debian.org>
+Build-Depends: debhelper (>=10)
+Standards-Version: 4.0
+#Homepage: 
+
+Package: rsbu
+Architecture: any
+Depends: ${misc:Depends}
+Description: rsync backup helper
+ This is a simple wrapper package for the rsync command.
+ .
+ This provides a simple functionality to prune old backup data.
