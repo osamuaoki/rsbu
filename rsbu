@@ -25,8 +25,13 @@ USER=$(id -un)
 if [ "$USER" = "root" ]; then
   RSBU_CONF="@SYSCONFDIR@/rsbu.conf"
 else
-  # unquoted to ensure tilde expansion
-  RSBU_CONF=~/.rsbu.conf
+  if [ -e .rsbu.conf ]; then
+    # if found in current directory, use it.
+    RSBU_CONF=.rsbu.conf
+  else
+    # unquoted to ensure tilde expansion
+    RSBU_CONF=~/.rsbu.conf
+  fi
 fi
 while [ -n "$1" ] ; do
   case $1 in
@@ -45,9 +50,6 @@ while [ -n "$1" ] ; do
       ;;
     -v) VERBOSE_LEVEL+=1
       ;;
-    --) shift
-      break
-      ;;
     *) break
       ;;
   esac
@@ -62,17 +64,6 @@ if [ $VERBOSE_LEVEL -ge $1 ]; then
   echo "$*" >&2
 fi
 }
-
-if [ "$SIM" = "echo" ]; then
-  vecho 4 "Simulation: ON"
-elif [ -z "$SIM" ]; then
-  vecho 4 "Simulation: OFF"
-else
-  vecho 1 "Unthinkable: \$SIM='$SIM'"
-fi
-vecho 4 "User: $UID"
-vecho 3 "Using configuration file: $RSBU_CONF"
-vecho 4 "VERBOSE_LEVEL; $VERBOSE_LEVEL"
 
 now_string () {
   date -u -Iseconds
@@ -90,7 +81,7 @@ epoch_string () {
   date -u -Iseconds -d@"$1"
 }
 
-age () {
+rsbu_age () {
 local -i x=$1
 local -i i
 local -i j
@@ -114,6 +105,7 @@ return
 
 sanity () {
 # sanity check and derivative constants
+local -i i
 if [ ${#RANGE[*]} -lt 2 ] || \
    [ ${#INTVL[*]} -lt 2 ] || \
    [ ${#RANGE[*]} != ${#INTVL[*]} ]; then
@@ -124,8 +116,12 @@ if [ -z "RSBU_ROOT_DIR" ]; then
   vecho 1 "RSBU_ROOT_DIR undefined"
   exit
 fi
-if [ -z "INITIAL_AGE_STEP" ]; then
-  vecho 1 "INITIAL_AGE_STEP undefined"
+if [ -z "$INITIAL_AGE" ]; then
+  vecho 1 "INITIAL_AGE undefined"
+  exit
+fi
+if [ $INITIAL_AGE -lt 0 ]; then
+  vecho 1 "INITIAL_AGE must be >=0 but INITIAL_AGE='$INITIAL_AGE'"
   exit
 fi
 if [ ! -d $RSBU_ROOT_DIR ]; then
@@ -133,69 +129,156 @@ if [ ! -d $RSBU_ROOT_DIR ]; then
 fi
 chown $USER $RSBU_ROOT_DIR
 chmod 700 $RSBU_ROOT_DIR
+
+vecho 3 "rsbu: RSBU_CONF=$RSBU_CONF RSBU_ROOT_DIR=$RSBU_ROOT_DIR"
+if [ "$SIM" = "echo" ]; then
+  vecho 4 "Simulation: ON"
+elif [ -z "$SIM" ]; then
+  vecho 4 "Simulation: OFF"
+else
+  vecho 1 "Unthinkable: \$SIM='$SIM'"
+fi
+vecho 4 "User: $UID"
+vecho 4 "VERBOSE_LEVEL; $VERBOSE_LEVEL"
 }
 
 rsbu_prune () {
-ARG1=$1 # if set, no actual prune
-n=$(now_epoch) # epoch for now
-cd "$RSBU_ROOT_DIR"
-LS=$(cd "$RSBU_ROOT_DIR"; ls -1rd BU_*)
-echo "Now:   $(now_string) epoch=$n"
-echo "======================================================"
-s=$INITIAL_SKIP_AGE
-px="" # previous directory string
-qx="" # previous epoch from directory string
-rx=-1 # previous age (initial=-1)
-for p in $LS; do
-  q=$(string_epoch ${p##BU_})
-  r=$(age $(($n-$q)))
-  vecho 4 "  Age: $r for $p ($q)"
-  if [ -z "$px" ]; then
-    vecho 3 "  age=$r (no action for the latest backup)"
-  elif [ $INITIAL_SKIP_AGE -ge $r ]; then
-    # Keep initial age backup
-    vecho 3 "  age=$r (no action if age <= $INITIAL_SKIP_AGE)"
-    echo "+ $px epoch=$qx age=$rx (initial)"
-  elif [ $s -lt $r ]; then
-    # new age, keep last $p (current $px)
-    vecho 3 "  age=$s --> $r (no action when age is updated)"
-    s=$r
-    echo "+ $px epoch=$qx age=$rx (oldest)"
-  else
-    vecho 3 "  age=$s !-> $r (remove older backup when age isn't updated)"
-    # same age
-    if [ -z "$ARG1" ]; then
-      vecho  4 "  removing whole directory tree: $RSBU_ROOT_DIR/$px"
-      rm -rf "$RSBU_ROOT_DIR/$px" 2>/dev/null >/dev/null || true
-      if [ -d "$RSBU_ROOT_DIR/$px" ]; then
-        # remove write protection from directories first
-        vecho  4 "  make directory writable recursively under: $RSBU_ROOT_DIR/$px"
-        find  "$RSBU_ROOT_DIR/$px" -type d -exec chmod u+w "{}" \;
-        vecho  4 "  removing whole directory tree again: $RSBU_ROOT_DIR/$px"
-        rm -rf "$RSBU_ROOT_DIR/$px"
-      fi
-      if [ -d "$RSBU_ROOT_DIR/$px" ]; then
-        echo "! $px epoch=$qx age=$rx (!!! not removed completely!!!)"
-      else
-        echo "_ $px epoch=$qx age=$rx (*** removed ***)"
-      fi
+ARG1="$1" # if set, no actual prune and list only
+now=$(now_epoch) # epoch for now
+declare -a LS=( $(cd "$RSBU_ROOT_DIR"; ls -1rd BU_*) )
+vecho 3 "   $(epoch_string $now) <== current time"
+vecho 3 "======================================================"
+if [ ${#LS[*]} = 0 ]; then
+  vecho 2 "No backup data found"
+  exit 1
+fi
+
+declare -a good
+declare -a state
+t="*error*"
+jmax=$((${#LS[*]} - 1))
+p=${LS[$jmax]}
+del=$(( $now - $(string_epoch ${p##BU_}) ))
+age=$(rsbu_age $del)
+agex=$(($age +1)) # start from infinity
+
+# 1st pass (backward!)
+for i in ${!LS[@]}; do
+  j=$(($jmax - $i)) # reverse index
+  p=${LS[$j]}
+  del=$(( $now - $(string_epoch ${p##BU_}) ))
+  age=$(rsbu_age $del)
+  if [ $agex -gt $age ];then
+    # age is different
+    if [ -e "$RSBU_ROOT_DIR/$p/rsbu_success" ]; then
+      state[$j]="oldest"
+      agex="$age"
     else
-      echo "- $px epoch=$qx age=$rx"
+      state[$j]=""
+    fi
+  else
+    # age is same
+    state[$j]=""
+  fi
+  if [ -e "$RSBU_ROOT_DIR/$p/rsbu_success" ]; then
+    good[$j]="success"
+  else
+    good[$j]="*error*"
+  fi
+done
+
+# 2nd pass (forward)
+for i in ${!LS[@]}; do
+  if [ ${good[$i]} = "success" ]; then
+    if [ -z "${state[$i]}" ]; then
+      state[$i]="first success"
+    else
+      state[$i]+=", first success"
+    fi
+    break
+  else
+    if [ -z "${state[$i]}" ]; then
+      state[$i]="inital error"
+    else
+      state[$i]+=", inital error"
     fi
   fi
-  px=$p
-  qx=$q
-  rx=$r
 done
-vecho 3 "  age=$r (keep the oldest backup always)"
-echo "+ $p epoch=$q age=$r (last)"
+
+# 3rd pass (forward)
+for i in ${!LS[@]}; do
+  p=${LS[$i]}
+  del=$(( $now - $(string_epoch ${p##BU_}) ))
+  age=$(rsbu_age $del)
+  if [ $age -le $INITIAL_AGE ]; then
+    if [ -z "${state[$i]}" ]; then
+      state[$i]="inital age"
+    else
+      state[$i]+=", inital age"
+    fi
+  else
+    break
+  fi
+done
+
+# 4th pass (backward)
+for i in ${!LS[@]}; do
+  j=$(($jmax - $i)) # reverse index
+  if [ ${good[$j]} = "success" ]; then
+    break
+  else
+    if [ -z "${state[$j]}" ]; then
+      state[$j]="tail error"
+    else
+      state[$j]+=", tail error"
+    fi
+  fi
+done
+
+# 5th pass (forward)
+for i in ${!LS[@]}; do
+  p=${LS[$i]}
+  del=$(( $now - $(string_epoch ${p##BU_}) ))
+  age=$(rsbu_age $del)
+  if [ -n "${state[$i]}" ]; then
+    echo "$p del=$del age=$age backup=${good[$i]} (${state[$i]})"
+  elif [ -n "$1" ]; then # "list"
+    echo "$p del=$del age=$age backup=${good[$i]} (*** ******* ***)"
+  else
+    vecho  4 "  removing whole directory tree: $RSBU_ROOT_DIR/$p"
+    $SIM rm -rf "$RSBU_ROOT_DIR/$p" 2>/dev/null >/dev/null || true
+    if [ -d "$RSBU_ROOT_DIR/$p" ]; then
+      # remove write protection from directories first
+      vecho  5 "  make directory writable recursively under: $RSBU_ROOT_DIR/$p"
+      $SIM find  "$RSBU_ROOT_DIR/$p" -type d -exec chmod u+w "{}" \;
+      vecho  5 "  removing whole directory tree again: $RSBU_ROOT_DIR/$p"
+      $SIM rm -rf "$RSBU_ROOT_DIR/$p"
+    fi
+    echo "$p del=$del age=$age backup=${good[$i]} (*** removed ***)"
+  fi
+done
 }
 
 rsbu_help () {
 echo "NAME"
 echo "    ${0##*/} -- rsync backup helper"
+echo
 echo "SYNOPSIS"
-echo "    ${0##*/} [-s|-x|-q|-v|-c <conf_file>] [--] [backup|list|prune|test|help]"
+echo "    ${0##*/} [-s|-x|-q|-v|-c <conf_file>] [backup|list|prune|help]"
+echo
+echo "DESCRIPTION"
+echo "    -s      simulated backup/prune without actual backup/prune"
+echo "    -x      trace shell command for debug"
+echo "    -q      quiet"
+echo "    -v      verbose"
+echo "    -vv     very verbose"
+echo "    -vvv    extremely verbose"
+echo "    -c <conf_file>  use specified configuration file instead"
+echo "    backup: backup data specified by \$RSYNC_SRC in $RSBU_CONF"
+echo "    list:   list backed up data in $RSBU_ROOT_DIR"
+echo "    prune:  prune old backed up data in $RSBU_ROOT_DIR"
+echo
+echo "Copyright 2018 Osamu Aoki <osamu@debian.org>, GPL 2+"
 }
 
 ##############################################################################
@@ -230,8 +313,6 @@ for x in "$@" ; do
     h*) rsbu_help
       ;;
     b*) rsbu_backup
-      ;;
-    s*) : # sanity 
       ;;
     p*) rsbu_prune
       ;;
