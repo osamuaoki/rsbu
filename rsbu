@@ -163,7 +163,7 @@ age=$(rsbu_age $del)
 agex=$((age +1)) # start from infinity
 
 # 1st pass (backward!)
-for i in ${!LS[@]}; do
+for i in "${!LS[@]}"; do
   j=$((jmax - i)) # reverse index
   p=${LS[$j]}
   del=$(( now - $(string_epoch "${p##BU_}") ))
@@ -188,7 +188,7 @@ for i in ${!LS[@]}; do
 done
 
 # 2nd pass (forward)
-for i in ${!LS[@]}; do
+for i in "${!LS[@]}"; do
   if [ "${good[$i]}" = "success" ]; then
     if [ -z "${state[$i]}" ]; then
       state[$i]="first success"
@@ -206,7 +206,7 @@ for i in ${!LS[@]}; do
 done
 
 # 3rd pass (forward)
-for i in ${!LS[@]}; do
+for i in "${!LS[@]}"; do
   p=${LS[$i]}
   del=$(( now - $(string_epoch "${p##BU_}") ))
   age=$(rsbu_age $del)
@@ -222,7 +222,7 @@ for i in ${!LS[@]}; do
 done
 
 # 4th pass (backward)
-for i in ${!LS[@]}; do
+for i in "${!LS[@]}"; do
   j=$((jmax - i)) # reverse index
   if [ "${good[$j]}" = "success" ]; then
     break
@@ -236,7 +236,7 @@ for i in ${!LS[@]}; do
 done
 
 # 5th pass (forward)
-for i in ${!LS[@]}; do
+for i in "${!LS[@]}"; do
   p=${LS[$i]}
   del=$(( now - $(string_epoch "${p##BU_}") ))
   age=$(rsbu_age $del)
