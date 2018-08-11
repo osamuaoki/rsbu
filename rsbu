@@ -59,7 +59,7 @@ done
 # internal functions
 ##############################################################################
 vecho () {
-if [ $VERBOSE_LEVEL -ge $1 ]; then
+if [ $VERBOSE_LEVEL -ge "$1" ]; then
   shift
   echo "$*" >&2
 fi
@@ -87,17 +87,17 @@ local -i i
 local -i j
 local -i y
 for i in ${!RANGE[*]}; do
-  if [ $x -le 0 ]; then
+  if [ "$x" -le 0 ]; then
     echo 0
-  elif [ $i != 0 ] && [ $x -le ${RANGE[$i]} ]; then
+  elif [ "$i" != 0 ] && [ "$x" -le "${RANGE[$i]}" ]; then
     j=$i-1
-    y=$(( ($x-${RANGE[$j]})/${INTVL[$j]}+${OFFSET[$j]} ))
+    y=$(( (x-${RANGE[$j]})/${INTVL[$j]}+${OFFSET[$j]} ))
     vecho 5 "    RANGE=$i(${RANGE[$j]} - ${RANGE[$i]}), INTVL=${INTVL[$j]}, OFFSET=${OFFSET[$j]}: $x ==> $y "
     echo $y
     return
   fi
 done
-y=$(( ($x-${RANGE[$i]})/${INTVL[$i]}+${OFFSET[$i]} ))
+y=$(( (x-${RANGE[$i]})/${INTVL[$i]}+${OFFSET[$i]} ))
 vecho 5 "    RANGE=$i(${RANGE[$j]} - ${RANGE[$i]}), INTVL=${INTVL[$j]}, OFFSET=${OFFSET[$j]}: $x ==> $y "
 echo $y
 return
@@ -112,7 +112,7 @@ if [ ${#RANGE[*]} -lt 2 ] || \
   vecho 1 "Wrong number of #RANGE, #INTVL: ${#RANGE[*]}, ${#INTVL[*]}"
   exit
 fi
-if [ -z "RSBU_ROOT_DIR" ]; then
+if [ -z "$RSBU_ROOT_DIR" ]; then
   vecho 1 "RSBU_ROOT_DIR undefined"
   exit
 fi
@@ -120,15 +120,15 @@ if [ -z "$INITIAL_AGE" ]; then
   vecho 1 "INITIAL_AGE undefined"
   exit
 fi
-if [ $INITIAL_AGE -lt 0 ]; then
+if [ "$INITIAL_AGE" -lt 0 ]; then
   vecho 1 "INITIAL_AGE must be >=0 but INITIAL_AGE='$INITIAL_AGE'"
   exit
 fi
-if [ ! -d $RSBU_ROOT_DIR ]; then
-  mkdir -p $RSBU_ROOT_DIR
+if [ ! -d "$RSBU_ROOT_DIR" ]; then
+  mkdir -p "$RSBU_ROOT_DIR"
 fi
-chown $USER $RSBU_ROOT_DIR
-chmod 700 $RSBU_ROOT_DIR
+chown "$USER" "$RSBU_ROOT_DIR"
+chmod 700 "$RSBU_ROOT_DIR"
 
 vecho 3 "rsbu: RSBU_CONF=$RSBU_CONF RSBU_ROOT_DIR=$RSBU_ROOT_DIR"
 if [ "$SIM" = "echo" ]; then
@@ -146,7 +146,7 @@ rsbu_prune () {
 ARG1="$1" # if set, no actual prune and list only
 now=$(now_epoch) # epoch for now
 declare -a LS=( $(cd "$RSBU_ROOT_DIR"; ls -1rd BU_*) )
-vecho 3 "   $(epoch_string $now) <== current time"
+vecho 3 "   $(epoch_string "$now") <== current time"
 vecho 3 "======================================================"
 if [ ${#LS[*]} = 0 ]; then
   vecho 2 "No backup data found"
@@ -158,17 +158,17 @@ declare -a state
 t="*error*"
 jmax=$((${#LS[*]} - 1))
 p=${LS[$jmax]}
-del=$(( $now - $(string_epoch ${p##BU_}) ))
+del=$(( now - $(string_epoch "${p##BU_}") ))
 age=$(rsbu_age $del)
-agex=$(($age +1)) # start from infinity
+agex=$((age +1)) # start from infinity
 
 # 1st pass (backward!)
 for i in ${!LS[@]}; do
-  j=$(($jmax - $i)) # reverse index
+  j=$((jmax - i)) # reverse index
   p=${LS[$j]}
-  del=$(( $now - $(string_epoch ${p##BU_}) ))
+  del=$(( now - $(string_epoch "${p##BU_}") ))
   age=$(rsbu_age $del)
-  if [ $agex -gt $age ];then
+  if [ $agex -gt "$age" ];then
     # age is different
     if [ -e "$RSBU_ROOT_DIR/$p/rsbu_success" ]; then
       state[$j]="oldest"
@@ -189,7 +189,7 @@ done
 
 # 2nd pass (forward)
 for i in ${!LS[@]}; do
-  if [ ${good[$i]} = "success" ]; then
+  if [ "${good[$i]}" = "success" ]; then
     if [ -z "${state[$i]}" ]; then
       state[$i]="first success"
     else
@@ -208,9 +208,9 @@ done
 # 3rd pass (forward)
 for i in ${!LS[@]}; do
   p=${LS[$i]}
-  del=$(( $now - $(string_epoch ${p##BU_}) ))
+  del=$(( now - $(string_epoch "${p##BU_}") ))
   age=$(rsbu_age $del)
-  if [ $age -le $INITIAL_AGE ]; then
+  if [ "$age" -le "$INITIAL_AGE" ]; then
     if [ -z "${state[$i]}" ]; then
       state[$i]="inital age"
     else
@@ -223,8 +223,8 @@ done
 
 # 4th pass (backward)
 for i in ${!LS[@]}; do
-  j=$(($jmax - $i)) # reverse index
-  if [ ${good[$j]} = "success" ]; then
+  j=$((jmax - i)) # reverse index
+  if [ "${good[$j]}" = "success" ]; then
     break
   else
     if [ -z "${state[$j]}" ]; then
@@ -238,7 +238,7 @@ done
 # 5th pass (forward)
 for i in ${!LS[@]}; do
   p=${LS[$i]}
-  del=$(( $now - $(string_epoch ${p##BU_}) ))
+  del=$(( now - $(string_epoch "${p##BU_}") ))
   age=$(rsbu_age $del)
   if [ -n "${state[$i]}" ]; then
     echo "$p del=$del age=$age backup=${good[$i]} (${state[$i]})"
@@ -284,11 +284,11 @@ echo "Copyright 2018 Osamu Aoki <osamu@debian.org>, GPL 2+"
 ##############################################################################
 # constants
 TIMESTAMP="BU_$(now_string)"
-if [ ! -e $RSBU_CONF ]; then
+if [ ! -e "$RSBU_CONF" ]; then
   vecho 1 "Can't find configuration file: $RSBU_CONF for user=$USER"
   exit 1
 fi
-source $RSBU_CONF
+source "$RSBU_CONF"
 sanity
 ##############################################################################
 # offset for age
@@ -296,7 +296,7 @@ declare -i i
 declare -i j
 declare -a OFFSET
 for i in ${!RANGE[*]}; do
-  if [ $i = 0 ]; then
+  if [ "$i" = 0 ]; then
     OFFSET[$i]=0
   else
     j=$i-1
